@@ -1,0 +1,262 @@
+---
+title: "MAGENTA: Assessement of ADR/eQTLs Position Relative to the Gene"
+author: "Makaela Mews"
+date: "`r Sys.Date()`"
+linkcolor: blue
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    number_sections: true
+    code_folding: show
+    df_print: paged
+    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load packages
+
+```{r}
+library(ggpubr)
+
+library(tidyverse)
+```
+
+
+
+
+## Function:  read_in_processed_eqtls
+```{r}
+read_in_processed_eqtls <- function(df_name) {
+  df <- read_tsv(paste0("eQTL_hgnc_biotype_a1_fst/", df_name, "_hgnc_biotype_a1_fst.tsv")) %>% dplyr::select(chr, pos, gene_id, a2, a1, variant_id, population)
+  
+  # assign results to global env with _v1 and _v2 names
+
+  assign(paste0(df_name), df, envir = .GlobalEnv)
+  
+}
+```
+
+## Application: processed eQTL data
+```{r}
+
+datasets <- c(
+  "aa_int_adr_eqtls", "aa_int_dual_adr_eqtls_eqtls", "aa_no_int",
+  "ch_int_adr_eqtls", "ch_int_dual_adr_eqtls_eqtls", "ch_no_int",
+  "per_int_adr_eqtls", "per_int_dual_adr_eqtls_eqtls", "per_no_int",
+  "nhw_int_adr_eqtls", "nhw_int_dual_adr_eqtls_eqtls", "nhw_no_int"
+)
+
+# apply function to all datasets
+for (df_name in datasets) {
+  read_in_processed_eqtls(df_name)
+}
+```
+
+## Load data
+
+
+```{r}
+mage <- rbind(aa_no_int, ch_no_int, nhw_no_int, per_no_int)
+
+magi <- rbind(aa_int_adr_eqtls, ch_int_adr_eqtls, nhw_int_adr_eqtls, per_int_adr_eqtls)
+
+magie <- rbind(aa_int_dual_adr_eqtls_eqtls, ch_int_dual_adr_eqtls_eqtls, nhw_int_dual_adr_eqtls_eqtls, per_int_dual_adr_eqtls_eqtls)
+
+```
+
+
+# Extract ENSG
+
+```{r}
+mage_ensg <- mage %>% dplyr::select(gene_id) %>% distinct(.)
+magi_ensg <- magi %>% dplyr::select(gene_id) %>% distinct(.)
+magie_ensg <- magie %>% dplyr::select(gene_id) %>% distinct(.)
+
+```
+
+## Combine ENSG IDs
+```{r}
+mage_magi_ensg <- rbind(mage_ensg, magi_ensg) %>% distinct(.)
+```
+
+### Write: ENSG IDs
+```{r}
+write_tsv(mage_magi_ensg, "variant_position_figures/MAGENTA_Nominal_ADReGenes_Dual_ENSG.txt", col_names = FALSE)
+```
+
+
+# Load: ENSG Gene Info
+Gene stable ID	Chromosome/scaffold name	Gene start (bp)	Gene end (bp)
+ENSG00000000457	1	169849631	169894267
+ENSG00000001036	6	143494812	143511720
+
+```{r}
+gene_info <- read_tsv('variant_position_figures/MAGENTA_Nominal_ADReGenes_Dual_ENSG_gene_info_w_strand.txt', skip = 1, col_names = c("gene_id","chr", "gene_start", "gene_end" , "strand")) 
+
+```
+
+# Bind with QTLs
+
+```{r}
+mage_ginfo <- left_join(mage, gene_info, by = c("gene_id", "chr")) 
+magi_ginfo <- left_join(magi, gene_info, by = c("gene_id", "chr"))  
+magie_ginfo <- left_join(magie, gene_info, by = c("gene_id", "chr"))  
+```
+
+# Function:  Assign eQTL location
+
+```{r}
+# Function definition
+assign_variant_location <- function(df) {
+  df %>%
+    mutate(
+      variant_location = case_when(
+        strand ==  1 & pos <  gene_start ~ "Upstream",
+        strand ==  1 & pos >= gene_start & pos <= gene_end ~ "Intragenic",
+        strand ==  1 & pos >  gene_end   ~ "Downstream",
+        
+        strand == -1 & pos <  gene_start ~ "Downstream",
+        strand == -1 & pos >= gene_start & pos <= gene_end ~ "Intragenic",
+        strand == -1 & pos >  gene_end   ~ "Upstream",
+        
+        TRUE ~ NA_character_  # fallback in case of missing values
+      )
+    )
+}
+```
+
+# Application: Add Location of Variant
+```{r}
+# Example usage
+mage_ginfo_strand <- assign_variant_location(mage_ginfo) %>%
+  mutate(variant_location = factor(variant_location, levels = c("Upstream", "Intragenic", "Downstream")))
+magi_ginfo_strand <- assign_variant_location(magi_ginfo) %>%
+  mutate(variant_location = factor(variant_location, levels = c("Upstream", "Intragenic", "Downstream")))
+magie_ginfo_strand <- assign_variant_location(magie_ginfo) %>%
+  mutate(variant_location = factor(variant_location, levels = c("Upstream", "Intragenic", "Downstream")))
+```
+
+# Extraction:  Intragenic ADR/eQTLs
+
+```{r}
+mage_intra <- mage_ginfo_strand %>%
+              filter(variant_location == "Intragenic") %>%
+              dplyr::select(chr,pos,a2,a1) %>%
+              distinct(.)
+magi_intra <- magi_ginfo_strand %>%
+              filter(variant_location == "Intragenic") %>%
+              dplyr::select(chr,pos,a2,a1) %>%
+              distinct(.) 
+magie_intra <- magie_ginfo_strand %>%
+              filter(variant_location == "Intragenic") %>%
+              dplyr::select(chr,pos,a2,a1) %>%
+              distinct(.)
+
+mage_i_ie_intra <- rbind(mage_intra, magi_intra, magie_intra)
+
+```
+
+##  Write: Intragenic ADR/eQTLs
+
+```{r}
+write_tsv(mage_i_ie_intra, "variant_position_figures/MAGENTA_Intragenic_eQTLs_chr_pos_ref_a2_eff_a1.tsv")
+```
+
+# Figures
+
+## eQTLs 
+
+```{r}
+# Stacked bar plot
+mage_ginfo_plot <- 
+  ggplot(mage_ginfo_strand, aes(x = population, fill = variant_location)) +
+  geom_bar(position = "fill", color = "black") +  # Stacked proportional bars
+  scale_fill_manual(values = c("Upstream" = "magenta", "Intragenic" = "orange", "Downstream" = "cadetblue1")) +
+  labs(
+    title = "eQTL Position by Population",
+    x = "Population",
+    y = "Proportion",
+    fill = "Variant Location"
+  ) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  theme(axis.text.x = element_text(face = "bold"))
+
+mage_ginfo_plot
+
+# Save the figure with specified dimensions and resolution
+ggsave("variant_position_figures/MAGENTA_eQTLs_ADReQTLs_position_by_Population_eqtl.png", mage_ginfo_plot, width = 5, height = 3, dpi = 300, units = "in")
+```
+
+
+## ADR-eQTLs
+
+```{r}
+# Stacked bar plot
+magi_ginfo_plot <- ggplot(magi_ginfo_strand, aes(x = population, fill = variant_location)) +
+  geom_bar(position = "fill", color = "black") +  # Stacked proportional bars
+  scale_fill_manual(values = c("Upstream" = "magenta", "Intragenic" = "orange", "Downstream" = "cadetblue1")) +
+  labs(
+    title = "ADR-eQTL Position by Population",
+    x = "Population",
+    y = "Proportion",
+    fill = "Variant Location"
+  ) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  theme(axis.text.x = element_text(face = "bold"))
+magi_ginfo_plot
+
+# Save the figure with specified dimensions and resolution
+ggsave("variant_position_figures/MAGENTA_eQTLs_ADReQTLs_position_by_Population_ADR.png", magi_ginfo_plot, width = 5, height = 3, dpi = 300, units = "in")
+```
+
+
+## Dual eQTLs & ADR-eQTLs
+
+```{r}
+# Stacked bar plot
+magie_ginfo_plot <- 
+  ggplot(magie_ginfo_strand, aes(x = population, fill = variant_location)) +
+  geom_bar(position = "fill", color = "black") +  # Stacked proportional bars
+  scale_fill_manual(values = c("Upstream" = "magenta", "Intragenic" = "orange", "Downstream" = "cadetblue1")) +
+  labs(
+    title = "Dual eQTL & ADR-eQTL Position by Population",
+    x = "Population",
+    y = "Proportion",
+    fill = "Variant Location"
+  ) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  theme(axis.text.x = element_text(face = "bold"))
+
+magie_ginfo_plot
+
+# Save the figure with specified dimensions and resolution
+ggsave("variant_position_figures/MAGENTA_eQTLs_ADReQTLs_position_by_Population_Dual.png", magie_ginfo_plot, width = 5, height = 3, dpi = 300, units = "in")
+```
+## Combination Plot
+
+```{r}
+# Arrange the plots vertically with a shared legend
+combined_plot <- ggarrange(
+  mage_ginfo_plot, magi_ginfo_plot, magie_ginfo_plot,
+  ncol = 1, nrow = 3,                # Stack plots vertically
+  labels = c("A", "B", "C"),         # Label plots
+  align = "v",                       # Align them vertically
+  common.legend = TRUE,              # Use one legend for all plots
+  legend = "bottom"                  # Place legend at the bottom
+)
+
+# Save the figure with specified dimensions and resolution
+ggsave(
+  "variant_position_figures/MAGENTA_eQTLs_ADReQTLs_position_by_Population_by_Strand.png",
+  combined_plot,
+  width = 5, height = 10, dpi = 300, units = "in"
+)
+
+print(combined_plot)
+```
