@@ -1,0 +1,134 @@
+---
+title: "MAGENTA: CH ADR-eQTLs & eQTLs BED Formatting for FILER Annotation"
+author: "Makaela Mews"
+date: "`r Sys.Date()`"
+linkcolor: blue
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    number_sections: true
+    code_folding: show
+    df_print: paged
+    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Load Packages
+
+```{r}
+
+library(knitr) 
+library(rmdformats)
+
+library(janitor)
+library(ggpubr)
+library(tidyverse)
+
+
+## Global options
+options(max.print="1000")
+opts_chunk$set(comment=NA , warning = FALSE, message = FALSE)
+opts_knit$set(width=75)
+
+theme_set(theme_classic())
+
+
+```
+
+
+## Function:  read_in_processed_eqtls
+```{r}
+read_in_processed_eqtls <- function(df_name) {
+  df <- read_tsv(paste0("eQTL_hgnc_biotype_a1_fst/", df_name, "_hgnc_biotype_a1_fst.tsv"))
+  
+  # assign results to global env with _v1 and _v2 names
+
+  assign(df_name, df, envir = .GlobalEnv)
+  
+}
+```
+
+## Application: processed eQTL data
+```{r}
+
+datasets <- c(
+  "ch_int_adr_eqtls", "ch_no_int"
+)
+
+# apply function to all datasets
+for (df_name in datasets) {
+  read_in_processed_eqtls(df_name)
+}
+```
+
+## Format Input Data
+
+```{r}
+ch_int_adr_eqtls_sub <- ch_int_adr_eqtls %>% 
+                        mutate(eqtl_type = "ADR_eQTL")  %>% 
+                        dplyr::select(population, chr, pos, eqtl_type)
+
+ch_no_int_sub <- ch_no_int %>% 
+                 mutate(eqtl_type = "nom_eQTL") %>% 
+                 dplyr::select(population, chr, pos, eqtl_type)
+
+# Combine both ADR-eQTLs and Nominal eQTLs after labeling
+ch_ad_combo <- rbind(ch_int_adr_eqtls_sub,ch_no_int_sub)
+```
+
+## Function: FILER Input Data Format
+
+```{r}
+write_eqtl_bedlike_subsets <- function(df, output_dir = ".") {
+  
+  # Added Functionality to Handle Multiple Ancestries/Populations
+  ancestries <- c("CH")
+  
+  for (anc in ancestries) {
+    # Subset by ancestry
+    df_sub <- df %>% filter(population == anc)
+    
+    # Function to prepare BED-like data
+    prepare_bedlike <- function(data) {
+      data %>%
+        dplyr::select(chr, pos) %>%
+        distinct() %>%
+        mutate(
+          chr = paste0("chr", chr),
+          end = pos + 1
+        ) %>%
+        arrange(chr, pos)
+    }
+    
+    # Process ADR_eQTL
+    adr_eqtl_bed <- df_sub %>%
+      filter(eqtl_type == "ADR_eQTL") %>%
+      prepare_bedlike()
+    
+    adr_file <- file.path(output_dir, paste0("MAGENTA_", anc, "_ADR_eqtls.bed"))
+    write.table(adr_eqtl_bed, adr_file, sep = "\t", row.names = FALSE, col.names = FALSE, quote = FALSE)
+    cat(paste0("Wrote ", nrow(ia_eqtl_bed), " rows to ", ia_file, "\n"))
+
+    # Process nom_eQTL
+    nom_eqtl_bed <- df_sub %>%
+      filter(eqtl_type == "nom_eQTL") %>%
+      prepare_bedlike()
+    
+    nom_file <- file.path(output_dir, paste0("MAGENTA_", anc, "_nom_eqtls.bed"))
+    write.table(nom_eqtl_bed, nom_file, sep = "\t", row.names = FALSE, col.names = FALSE, quote = FALSE)
+    cat(paste0("Wrote ", nrow(nom_eqtl_bed), " rows to ", nom_file, "\n"))
+  }
+}
+
+```
+
+## Application: FILER BED Format Files
+
+```{r}
+write_eqtl_bedlike_subsets(ch_ad_combo, output_dir = "filer/")
+
+```
