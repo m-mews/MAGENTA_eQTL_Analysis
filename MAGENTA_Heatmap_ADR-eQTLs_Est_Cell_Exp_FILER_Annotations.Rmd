@@ -1,0 +1,513 @@
+---
+title: "MAGENTA: Heatmap of AD-Literature Supported, Likely Causal ADR-eQTLs with Estimated Cell-type Expression & FILER Annotations"
+author: "Makaela Mews"
+date: "`r Sys.Date()`"
+linkcolor: blue
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    number_sections: true
+    code_folding: show
+    df_print: paged
+    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load Libraries
+
+```{r}
+
+
+library(stringr)
+library(purrr)
+library(patchwork)
+library(ggnewscale)
+library(viridis)
+
+library(tidyverse)
+
+```
+
+## Load Data
+
+### Absolute Quantification of Cell-type Expression per Gene
+
+```{r}
+hires <- read_tsv('hires/magenta_hires_analysis_adr_egenes_202505131252.tsv')
+```
+
+### Genes of Interest
+
+```{r}
+susie_hgnc_lit_sup_high_confi <- read_tsv("susie/MAGENTA_SUSIE_Causal_SNPs_PIP_7_Protein_Coding_Lit_Sup.tsv") %>% distinct(.)
+
+```
+
+
+
+# Format Data
+
+## Extract: LM22 Single-Cell Profile CIBERSORTx Quantifications
+
+```{r}
+hires_lm22_subset <- hires %>% filter(STATUS == "AD" | STATUS == "CONTROL") %>%
+  select(gene_symbol, molecular_trait_id, analysis_group, STATUS, starts_with("LM22"))
+
+# To view the result
+head(hires_lm22_subset)
+```
+
+## Load: Imputation Qvalues 
+
+```{r}
+hires_qvals_lm22 <- read_tsv('hires/CIBERSORTxGEP_MULTI_ANCESTRY_LM22_GEPs_Qvals.txt')
+```
+
+### Format: Qvalues
+```{r}
+# Create a copy of the column names
+new_colnames <- colnames(hires_qvals_lm22)
+
+# Remove spaces and add prefix, skipping the first column (GeneSymbol)
+new_colnames[-1] <- paste0("LM22_", gsub(" ", "", new_colnames[-1]))
+
+# Rename the first column
+new_colnames[1] <- "gene_symbol"
+
+# Apply the new column names to the dataframe
+colnames(hires_qvals_lm22) <- new_colnames
+
+colnames(hires_qvals_lm22) <- gsub(
+  pattern = "LM22_Tcellsregulatory\\(Tregs\\)",
+  replacement = "LM22_Tcellsregulatory_Tregs",
+  x = colnames(hires_qvals_lm22)
+)
+
+glimpse(hires_qvals_lm22)
+```
+
+
+# Step 1: Find common LM22 columns (excluding gene_symbol)
+```{r}
+lm22_cols_subset <- setdiff(colnames(hires_lm22_subset), c("gene_symbol", "molecular_trait_id", "analysis_group", "STATUS"))
+lm22_cols_qvals <- setdiff(colnames(hires_qvals_lm22), "gene_symbol")
+common_cols <- intersect(lm22_cols_subset, lm22_cols_qvals)
+
+```
+
+
+# Step 2: Join the two dataframes by gene_symbol to align rows
+```{r}
+combined <- hires_lm22_subset %>%
+  select(gene_symbol, all_of(common_cols), molecular_trait_id, analysis_group, STATUS) %>%
+  left_join(
+    hires_qvals_lm22 %>% select(gene_symbol, all_of(common_cols)),
+    by = "gene_symbol",
+    suffix = c("_subset", "_qvals")
+  )
+```
+
+
+# Step 3: For each common LM22 column, replace values in subset with NA if qval >= 0.05
+```{r}
+for (col in common_cols) {
+  subset_col <- paste0(col, "_subset")
+  qval_col <- paste0(col, "_qvals")
+  combined[[subset_col]][combined[[qval_col]] >= 0.05] <- NA
+}
+```
+
+# Step 4: Restore original dataframe structure, keeping filtered LM22 values
+```{r}
+hires_lm22_subset_filtered <- combined %>%
+  select(gene_symbol, molecular_trait_id, analysis_group, STATUS, ends_with("_subset")) %>%
+  rename_with(~ gsub("_subset$", "", .), ends_with("_subset"))
+```
+
+
+
+# Step 5: Summarize across cell-types
+
+## Keep NA
+
+```{r}
+hires_lm22_summarized <- hires_lm22_subset_filtered %>%
+  group_by(gene_symbol, molecular_trait_id, analysis_group) %>%
+  summarise(across(starts_with("LM22"), ~sum(.x, na.rm = FALSE)), .groups = "drop")
+
+# View the summarized table
+head(hires_lm22_summarized)
+```
+## Keep AD Status
+
+```{r}
+hires_lm22_summarized_status <- hires_lm22_subset_filtered %>%
+  group_by(gene_symbol, molecular_trait_id, analysis_group, STATUS) %>%
+  summarise(across(starts_with("LM22"), ~sum(.x, na.rm = FALSE)), .groups = "drop")
+head(hires_lm22_summarized_status)
+```
+
+# Step 6: Convert Absolute Quantification to Proportional Representative of Cell-type Expression
+
+## Function: Cell-type Proportions
+```{r}
+proportion_lm22 <- function(df) {
+  lm22_cols <- df %>% select(starts_with("LM22")) %>% colnames()
+  
+  df %>%
+    rowwise() %>%
+    mutate(
+      lm22_total = sum(c_across(all_of(lm22_cols)), na.rm = TRUE),
+      across(all_of(lm22_cols), ~ .x / lm22_total, .names = "{.col}_pct")
+    ) %>%
+    ungroup() %>%
+    select(-lm22_total)
+}
+
+# Apply the function to your summarized table
+hires_lm22_proportion <- proportion_lm22(hires_lm22_summarized)
+
+# View the result
+head(hires_lm22_proportion)
+```
+
+## Application
+
+```{r}
+# Apply the function to your summarized table
+hires_lm22_proportion_status <- proportion_lm22(hires_lm22_summarized_status)
+
+# View the result
+head(hires_lm22_proportion_status)
+```
+
+# Step 7: Combine Proportional Representative of Cell-type Expression with ADR-eQTLs w/AD Lit Support
+
+
+### Join with Genes of Interest
+
+```{r}
+
+susie_hgnc_lit_sup_high_confi %>% nrow()
+susie_confi_hires <- inner_join(susie_hgnc_lit_sup_high_confi, hires_lm22_proportion_status, by = c( "molecular_trait_id" = "molecular_trait_id", "population" = "analysis_group"))
+
+
+```
+
+### Drop Columns with all NA values
+
+```{r}
+susie_confi_hires_clean <- susie_confi_hires %>%
+  select(where(~ !all(is.na(.))))
+```
+
+# Step 8: Combine Dataset with Corresponding Positional Annotations
+
+## Load: FILER Annotations
+
+### AA
+
+```{r}
+# Read the space-delimited file (no header)
+aa_filer_sum <- read_delim('filer/AA_ADR_eQTL_filer_summary_clean.tsv', delim = " ", col_names = c("filer_id", "anno"))
+
+# Split 'filer_id' into chr, pos, pos_end
+aa_filer_sum <- aa_filer_sum %>%
+  separate(filer_id, into = c("chr", "pos", "pos_end"), sep = "_", remove = FALSE) %>%
+  mutate(
+    chr = as.integer(str_remove(chr, "chr")),
+    pos = as.integer(pos),
+    pos_end = as.integer(pos_end)
+  )
+
+```
+
+### NHW
+
+```{r}
+# Read the space-delimited file (no header)
+nhw_filer_sum <- read_delim('filer/NHW_ADR_eQTL_filer_summary_clean.tsv', delim = " ", col_names = c("filer_id", "anno"))
+
+# Split 'filer_id' into chr, pos, pos_end
+nhw_filer_sum <- nhw_filer_sum %>%
+  separate(filer_id, into = c("chr", "pos", "pos_end"), sep = "_", remove = FALSE) %>%
+  mutate(
+    chr = as.integer(str_remove(chr, "chr")),
+    pos = as.integer(pos),
+    pos_end = as.integer(pos_end)
+  )
+
+```
+
+### CH
+
+```{r}
+# Read the space-delimited file (no header)
+ch_filer_sum <- read_delim('filer/CH_AD_ADR_eQTL_filer_summary_clean.tsv', delim = " ", col_names = c("filer_id", "anno"))
+
+# Split 'filer_id' into chr, pos, pos_end
+ch_filer_sum <- ch_filer_sum %>%
+  separate(filer_id, into = c("chr", "pos", "pos_end"), sep = "_", remove = FALSE) %>%
+  mutate(
+    chr = as.integer(str_remove(chr, "chr")),
+    pos = as.integer(pos),
+    pos_end = as.integer(pos_end)
+  )
+
+```
+
+### PER
+
+```{r}
+# Read the space-delimited file (no header)
+per_filer_sum <- read_delim('filer/PER_ADR_eQTL_filer_summary_clean.tsv', delim = " ", col_names = c("filer_id", "anno"))
+
+# Split 'filer_id' into chr, pos, pos_end
+per_filer_sum <- per_filer_sum %>%
+  separate(filer_id, into = c("chr", "pos", "pos_end"), sep = "_", remove = FALSE) %>%
+  mutate(
+    chr = as.integer(str_remove(chr, "chr")),
+    pos = as.integer(pos),
+    pos_end = as.integer(pos_end)
+  )
+
+```
+
+#### Combine
+```{r}
+combo_filer_sum <- rbind(aa_filer_sum, ch_filer_sum, nhw_filer_sum, per_filer_sum) %>% distinct(.) 
+```
+
+# Step 9: Convert FILER Annotations Binary Format
+
+```{r}
+
+annos_df <- combo_filer_sum %>% select(anno) %>% distinct(.)
+# All possible anno values 
+annos <- annos_df$anno
+
+combo_filer_binary <- combo_filer_sum %>%
+  # ensure only one row per (chr, pos, anno)
+  distinct(chr, pos, anno) %>%
+  # mark presence and lock anno to the full set of levels
+  mutate(
+    anno = factor(anno, levels = annos),
+    present = 1L
+  ) %>%
+  # wide binary matrix with all anno columns
+  pivot_wider(
+    id_cols   = c(chr, pos),
+    names_from = anno,
+    values_from = present,
+    values_fill = 0,
+    values_fn = max,
+    names_expand = TRUE
+  ) %>%
+  # keep columns as integer 0/1
+  mutate(across(all_of(annos), as.integer)) %>%
+  arrange(chr, pos)
+
+```
+
+### Write: Binary ADR-eQTL FILER Summary Annotations by Data Category
+
+```{r}
+write_tsv(combo_filer_binary, "MAGENTA_ADR_eQTLs_FILER_Summary_Data_Categories.tsv")
+```
+
+# Step 10: Join with Likely Causal ADR-eQTLs w/Cell-type Exp Proportions
+
+```{r}
+
+susie_confi_hires_clean_v1 <- susie_confi_hires_clean %>%
+                              rename(chr = chrom) %>%
+                              mutate(chr = as.integer(chr), pos = as.integer(pos))
+
+susie_confi_hires_filer <- left_join(susie_confi_hires_clean_v1, combo_filer_binary, by = c("chr", "pos"))
+```
+
+### Subset: AD Cell-type Exp Proportions
+
+```{r}
+susie_confi_hires_filer_ad <- susie_confi_hires_filer %>%
+                              filter(STATUS == "AD") %>%
+                              distinct(.)
+```
+
+# Step 11: Generate - Heatmap
+
+```{r}
+
+
+df <- susie_confi_hires_filer_ad
+
+# Short row label + uniqueness safeguard
+df <- df %>%
+  mutate(
+    row_label = paste0(population, ": ", hgnc_symbol, " - ", variant_id)
+  ) %>%
+  group_by(row_label) %>%
+  mutate(row_label = if (n() > 1) paste0(row_label, " (", row_number(), ")") else row_label) %>%
+  ungroup()
+
+# Column groups
+pct_cols <- c(
+  "LM22_Bcellsmemory_pct","LM22_Bcellsnaive_pct",
+  "LM22_Dendriticcellsactivated_pct","LM22_Dendriticcellsresting_pct",
+  "LM22_Mastcellsresting_pct","LM22_Monocytes_pct",
+  "LM22_NKcellsactivated_pct","LM22_NKcellsresting_pct",
+  "LM22_Neutrophils_pct",
+  "LM22_TcellsCD4memoryactivated_pct","LM22_TcellsCD4memoryresting_pct",
+  "LM22_TcellsCD4naive_pct","LM22_TcellsCD8_pct"
+)
+
+anno_cols <- c(
+  "ABC_Activity-by-Contact_model","Accessible_chromatin","ChIA-PET",
+  "Chromatin_states","Enhancer","eQTL","Hi-C","Histone_ChIP-seq_peaks",
+  "IM-PET","pcHi-C","Small_RNA","sQTL","TFBS","TF_ChIP-seq_peaks","TSS"
+)
+
+# Clean display names for *_pct (retain underscores)
+clean_pct_name <- function(x) {
+  x %>%
+    str_remove("^LM22_") %>%
+    str_remove("_pct$") %>%
+    str_replace_all("cells", "_cells_") %>%
+    str_replace_all("memory", "_memory_") %>%
+    str_replace_all("naive", "_naive_") %>%
+    str_replace_all("^Tcells", "T_cells") %>%
+    str_replace_all("^NKcells", "NK_cells") %>%
+    str_replace_all("^Bcells", "B_cells") %>%
+    str_replace_all("_+", "_") %>%
+    str_remove("^_") %>%
+    str_remove("_$")
+}
+
+pct_display <- setNames(vapply(pct_cols, clean_pct_name, character(1L)), pct_cols)
+
+# Z column named "Z" and ordered first
+sign_col <- "Z"
+feature_levels <- c(sign_col, unname(pct_display), anno_cols)
+
+# Row order
+row_order <- df %>%
+  arrange(population, hgnc_symbol, desc(z_ad_int)) %>%
+  pull(row_label) %>%
+  unique()
+
+# *_pct (continuous)
+pct_long <- df %>%
+  select(row_label, all_of(pct_cols)) %>%
+  pivot_longer(-row_label, names_to = "feature_raw", values_to = "value") %>%
+  mutate(
+    feature = factor(unname(pct_display[feature_raw]), levels = feature_levels),
+    row_label = factor(row_label, levels = rev(row_order))
+  )
+
+# Z sign (cadetblue / salmon / lightgrey)
+sign_long <- df %>%
+  transmute(
+    row_label,
+    feature = factor(sign_col, levels = feature_levels),
+    sign_cat = case_when(
+      is.na(z_ad_int)      ~ "zero_or_na",
+      sign(z_ad_int) == -1 ~ "neg",
+      sign(z_ad_int) ==  1 ~ "pos",
+      TRUE                 ~ "zero_or_na"
+    )
+  ) %>%
+  mutate(row_label = factor(row_label, levels = levels(pct_long$row_label)))
+
+# Annotations (binary; NA→0)
+anno_long <- df %>%
+  select(row_label, all_of(anno_cols)) %>%
+  mutate(across(all_of(anno_cols), ~ as.integer(coalesce(., 0L)))) %>%
+  pivot_longer(-row_label, names_to = "feature", values_to = "present") %>%
+  mutate(
+    feature = factor(feature, levels = feature_levels),
+    row_label = factor(row_label, levels = levels(pct_long$row_label))
+  )
+
+# --- Title (wrapped to journal width) ---
+title_text <- "Estimated Cell-type Expression Profile and Functional Annotation of Likely Causal ADR-eQTLs"
+title_wrapped <- str_wrap(title_text, width = 40)
+
+# --- Plot ---
+p <- ggplot() +
+  # --- Z column first ---
+  geom_tile(
+    data = sign_long,
+    aes(x = feature, y = row_label, fill = sign_cat),
+    color = "darkgrey", size = 0.2
+  ) +
+  scale_fill_manual(
+    values = c(neg = "cadetblue", pos = "salmon", zero_or_na = "lightgrey"),
+    breaks = c("neg", "pos", "zero_or_na"),
+    labels = c("Z<0", "Z>0", "Z=0/NA"),
+    name = "Z"
+  ) +
+  ggnewscale::new_scale_fill() +
+
+  # --- LM22 continuous (NA → lightgrey) ---
+  geom_tile(
+    data = pct_long,
+    aes(x = feature, y = row_label, fill = value),
+    color = "darkgrey", size = 0.2
+  ) +
+  viridis::scale_fill_viridis(
+    na.value = "lightgrey", option = "C", name = "Cell-type Expression Profile"
+  ) +
+  ggnewscale::new_scale_fill() +
+
+  # --- FILER Annotation (1 = cadetblue2, 0 = lightgrey) ---
+  geom_tile(
+    data = anno_long,
+    aes(x = feature, y = row_label, fill = factor(present)),
+    color = "darkgrey", size = 0.2
+  ) +
+  scale_fill_manual(
+    values = c("0" = "lightgrey", "1" = "cadetblue2"),
+    drop = FALSE,
+    name = "FILER Annotation"
+  ) +
+
+  labs(
+    x = NULL, y = NULL,
+    title = title_wrapped
+  ) +
+  theme_classic(base_size = 10) +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 60, hjust = 1, vjust = 1),
+    axis.text.y = element_text(size = 8),
+    plot.title = element_text(face = "bold", margin = margin(b = 6))
+  )
+p
+
+```
+
+## Save: Heatmap
+```{r}
+# --- Export: PNG @ 600 dpi ---
+# Dynamic size based on rows/columns with sensible caps for journals
+n_rows <- length(levels(pct_long$row_label))
+n_cols <- length(levels(pct_long$feature))  # includes Z + LM22 + annotation columns
+
+# Width ~ columns; Height ~ rows. 
+w_in <- max(7.0, min(8.5, 0.28 * n_cols))   # ~7–8.5 inches
+h_in <- max(5.5, min(11.0, 0.28 * n_rows))  # ~5.5–11 inches
+
+ggsave(
+  filename = "filer/MAGENTA_Heatmap_ADR_eQTLs_AD_Lit_Supported_Cell_type_Exp_FILER_Annotations.png",
+  plot = p,
+  width = w_in,
+  height = h_in,
+  units = "in",
+  dpi = 600
+)
+
+```
+
