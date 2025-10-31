@@ -1,0 +1,691 @@
+---
+title: "MAGENTA: ADR/eGenes Comparison Across Populations"
+author: "Makaela Mews"
+date: "`r Sys.Date()`"
+linkcolor: blue
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    number_sections: true
+    code_folding: show
+    df_print: paged
+    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## load packages
+
+```{r}
+library(ggpubr)
+
+library(tidyverse)
+```
+
+### Function:  Summarize Counts & % Gene Level
+```{r}
+
+# Function to summarize counts and percentages for a dataframe
+summarize_gene_level <- function(df, df_name) {
+  df %>%
+    dplyr::select(gene_id) %>% 
+    distinct(.) %>%
+    summarise(count = n(), .groups = "drop") %>%
+    mutate(
+      dataset = df_name
+    ) %>%
+    dplyr::select(dataset, count)
+}
+```
+
+## Load Background 
+
+
+## Read HGNC Key
+
+```{r}
+ensg_hgnc_key <- read_tsv('key_files/MAGENTA_ALL_EXP_Genes_ENSG_HGNC_Gene_Biotype.tsv')
+```
+## Function: Read Background Expression Files
+
+```{r}
+# helper: read expression file, keep distinct, join HGNC
+read_and_join_hgnc <- function(file, ensg_hgnc_key) {
+  read_tsv(file) %>%
+    distinct() %>%
+    left_join(ensg_hgnc_key, by = c("gene_id" = "ensembl_gene_id"))
+}
+
+# named list of populations and their files
+files <- list(
+  per = "all_exp_genes/MAGENTA_PER.low_expression_filtered.outlier_removed.tmm.expression_genes.txt",
+  aa  = "all_exp_genes/MAGENTA_AA.low_expression_filtered.outlier_removed.tmm.expression_genes.txt",
+  ch  = "all_exp_genes/MAGENTA_CH_AD.low_expression_filtered.outlier_removed.tmm.expression_genes.txt",
+  nhw = "all_exp_genes/MAGENTA_NHW.low_expression_filtered.outlier_removed.tmm.expression_genes.txt"
+)
+
+# process all and save to global environment with *_exp_ensg names
+for (pop in names(files)) {
+  df <- read_and_join_hgnc(files[[pop]], ensg_hgnc_key)
+  assign(paste0(pop, "_exp_ensg"), df, envir = .GlobalEnv)
+}
+```
+
+
+### Function Application:  Background Gene Biotypes
+
+```{r}
+# Apply to all four datasets
+aa_summary  <- summarize_gene_level(aa_exp_ensg,  "AA")
+ch_summary  <- summarize_gene_level(ch_exp_ensg,  "CH")
+nhw_summary <- summarize_gene_level(nhw_exp_ensg, "NHW")
+per_summary <- summarize_gene_level(per_exp_ensg, "PER")
+
+# Combine into one table
+all_biotype_summary <- bind_rows(aa_summary, ch_summary, nhw_summary, per_summary)
+
+# View results
+all_biotype_summary
+
+```
+
+## Write BACKGROUND EXP Genes by Biotype
+```{r}
+write_tsv(all_biotype_summary, 'gene_level_sum/MAGENTA_Gene_Summary_Background_Expressed_Genes.tsv')
+```
+
+## Read: Background Exp Genes by Biotype
+
+```{r}
+all_biotype_summary <- read_tsv('gene_level_sum/MAGENTA_Gene_Summary_Background_Expressed_Genes.tsv')
+```
+
+
+## Function:  read_in_processed_eqtls
+```{r}
+read_in_processed_eqtls <- function(df_name) {
+  df <- read_tsv(paste0("eQTL_hgnc_biotype_a1_fst/", df_name, "_hgnc_biotype_a1_fst.tsv")) %>% dplyr::select(chr, pos, gene_id, a2, a1, variant_id, population)
+  
+  # assign results to global env with _v1 and _v2 names
+
+  assign(paste0(df_name), df, envir = .GlobalEnv)
+  
+}
+```
+
+## Read: processed eQTL data
+```{r}
+
+datasets <- c(
+  "aa_int_adr_eqtls", "aa_int_dual_adr_eqtls_eqtls", "aa_no_int",
+  "ch_int_adr_eqtls", "ch_int_dual_adr_eqtls_eqtls", "ch_no_int",
+  "per_int_adr_eqtls", "per_int_dual_adr_eqtls_eqtls", "per_no_int",
+  "nhw_int_adr_eqtls", "nhw_int_dual_adr_eqtls_eqtls", "nhw_no_int"
+)
+
+# apply function to all datasets
+for (df_name in datasets) {
+  read_in_processed_eqtls(df_name)
+}
+```
+
+
+
+## ADR-eGenes
+
+### Function Application:  ADR-eGenes Gene Biotypes
+```{r}
+# Apply to all four datasets
+aa_adr_egenes_summary  <- summarize_gene_level(aa_int_adr_eqtls,  "AA_ADR-eGenes")
+ch_adr_egenes_summary  <- summarize_gene_level(ch_int_adr_eqtls,  "CH_ADR-eGenes")
+nhw_adr_egenes_summary <- summarize_gene_level(nhw_int_adr_eqtls, "NHW_ADR-eGenes")
+per_adr_egenes_summary <- summarize_gene_level(per_int_adr_eqtls, "PER_ADR-eGenes")
+
+# Combine into one table
+all_adr_egenes_biotype_summary <- bind_rows(aa_adr_egenes_summary, ch_adr_egenes_summary, nhw_adr_egenes_summary, per_adr_egenes_summary)
+
+# View results
+all_adr_egenes_biotype_summary
+```
+
+#### Write:  ADR-eGenes
+
+```{r}
+write_tsv(all_adr_egenes_biotype_summary, 'gene_level_sum/MAGENTA_Gene_Summary_ADR_eGenes.tsv')
+
+```
+
+#### Read: ADR-eGenes by Biotype
+
+```{r}
+all_adr_egenes_biotype_summary <-  read_tsv('gene_level_sum/MAGENTA_Gene_Summary_ADR_eGenes.tsv')
+```
+
+## Standard:  Dual ADR-eGenes & eGenes
+
+### Function Application:  ADR-eGenes Gene Biotypes
+```{r}
+# Apply to all four datasets
+aa_dual_adr_egenes_summary  <- summarize_gene_level(aa_int_dual_adr_eqtls_eqtls,  "AA_Dual_ADR-eGenes_eGenes")
+ch_dual_adr_egenes_summary  <- summarize_gene_level(ch_int_dual_adr_eqtls_eqtls,  "CH_Dual_ADR-eGenes_eGenes")
+nhw_dual_adr_egenes_summary <- summarize_gene_level(nhw_int_dual_adr_eqtls_eqtls, "NHW_Dual_ADR-eGenes_eGenes")
+per_dual_adr_egenes_summary <- summarize_gene_level(per_int_dual_adr_eqtls_eqtls, "PER_Dual_ADR-eGenes_eGenes")
+
+# Combine into one table
+all_dual_adr_egenes_biotype_summary <- bind_rows(aa_dual_adr_egenes_summary, ch_dual_adr_egenes_summary, nhw_dual_adr_egenes_summary, per_dual_adr_egenes_summary)
+
+# View results
+all_dual_adr_egenes_biotype_summary
+```
+
+
+## Alternative Summary: Dual ADR-eGenes & eGenes
+
+
+```{r}
+summarize_gene_level_dual <- function(int_df, no_int_df, dual_int_df, file_name, df_name) {
+  
+  # Ensure output directory exists
+  if (!dir.exists("gene_level_sum")) dir.create("gene_level_sum")
+  
+  # Extract unique gene_ids
+  int_df_genes   <- distinct(int_df, gene_id)
+  no_int_genes   <- distinct(no_int_df, gene_id)
+  dual_int_genes <- distinct(dual_int_df, gene_id)
+  
+  # Shared genes between int and no_int
+  int_no_int_genes_join <- inner_join(int_df_genes, no_int_genes, by = "gene_id")
+  
+  # Combine with dual genes
+  all_dual_genes <- bind_rows(int_no_int_genes_join, dual_int_genes) %>% distinct()
+  
+  # Save in environment with name = df_name
+  assign(df_name, all_dual_genes, envir = .GlobalEnv)
+  
+  # Write to file
+  file_name_r <- paste0("gene_level_sum/", file_name, ".tsv")
+  write_tsv(all_dual_genes, file_name_r)
+  
+  # Return summary
+  tibble(
+    dataset = df_name,
+    count = nrow(all_dual_genes)
+  )
+}
+
+```
+
+
+
+### Function Application:  Dual eGenes & ADR-eGenes
+
+```{r}
+# Apply to all four datasets
+aa_dual_adr_egenes_summary_correct  <- summarize_gene_level_dual(aa_int_adr_eqtls, aa_no_int, aa_int_dual_adr_eqtls_eqtls,  "aa_Dual_ADR-eGenes_eGenes_Correct",  "AA_Dual_ADR-eGenes_eGenes")
+
+ch_dual_adr_egenes_summary_correct  <- summarize_gene_level_dual(ch_int_adr_eqtls, ch_no_int,  ch_int_dual_adr_eqtls_eqtls,  "ch_Dual_ADR-eGenes_eGenes_Correct", "CH_Dual_ADR-eGenes_eGenes")
+
+nhw_dual_adr_egenes_summary_correct <- summarize_gene_level_dual(nhw_int_adr_eqtls, nhw_no_int, nhw_int_dual_adr_eqtls_eqtls, "nhw_Dual_ADR-eGenes_eGenes_Correct", "NHW_Dual_ADR-eGenes_eGenes")
+
+per_dual_adr_egenes_summary_correct <- summarize_gene_level_dual(per_int_adr_eqtls, per_no_int, per_int_dual_adr_eqtls_eqtls, "per_Dual_ADR-eGenes_eGenes_Correct", "PER_Dual_ADR-eGenes_eGenes")
+
+# Combine into one table
+all_dual_adr_egenes_biotype_summary_correct <- bind_rows(aa_dual_adr_egenes_summary_correct, ch_dual_adr_egenes_summary_correct, nhw_dual_adr_egenes_summary_correct, per_dual_adr_egenes_summary_correct)
+
+# View results
+all_dual_adr_egenes_biotype_summary_correct
+```
+
+#### Write: Dual ADR/eGenes 
+
+```{r}
+write_tsv(all_dual_adr_egenes_biotype_summary_correct, 'gene_level_sum/MAGENTA_Gene_Biotypes_Dual_ADR_eGenes_eGenes_correct.tsv')
+
+```
+
+#### Read: Dual ADR/eGenes by Biotype
+
+```{r}
+all_dual_adr_egenes_biotype_summary_correct <- read_tsv('gene_level_sum/MAGENTA_Gene_Biotypes_Dual_ADR_eGenes_eGenes_correct.tsv')
+```
+
+## Function Application:  eGenes 
+
+```{r}
+# Apply to all four datasets
+aa_egenes_summary  <- summarize_gene_level(aa_no_int,  "AA_eGenes")
+ch_egenes_summary  <- summarize_gene_level(ch_no_int,  "CH_eGenes")
+nhw_egenes_summary <- summarize_gene_level(nhw_no_int, "NHW_eGenes")
+per_egenes_summary <- summarize_gene_level(per_no_int, "PER_eGenes")
+
+# Combine into one table
+all_egenes_biotype_summary <- bind_rows(aa_egenes_summary, ch_egenes_summary, nhw_egenes_summary, per_egenes_summary)
+
+# View results
+all_egenes_biotype_summary
+```
+
+#### Write:  eGenes by Biotype
+
+```{r}
+write_tsv(all_egenes_biotype_summary, 'gene_level_sum/MAGENTA_Gene_Summary_eGenes.tsv')
+
+```
+
+#### Read:  eGenes by Biotype
+
+```{r}
+all_egenes_biotype_summary <- read_tsv('summary_files/MAGENTA_Gene_Biotypes_eGenes.tsv')
+```
+
+
+
+# GOAL: Table 1 ADR/eGenes
+
+Calculate eGenes & ADR-eGenes & Dual ADR/eGenes
+
+## Combine Files
+
+
+```{r}
+
+all_adr_egenes_biotype_summary_subset <- all_adr_egenes_biotype_summary %>%
+                                          rename(count_ADR_eGenes = count) %>% 
+                                          mutate(dataset = sub("_.*", "", dataset)) %>%
+                                          dplyr::select(dataset, count_ADR_eGenes)
+
+all_dual_adr_egenes_biotype_summary_subset <- all_dual_adr_egenes_biotype_summary_correct %>%
+                                          rename(count_Dual_ADR_eGenes_eGenes = count) %>% 
+                                          mutate(dataset = sub("_.*", "", dataset)) %>%
+                                          dplyr::select(dataset, count_Dual_ADR_eGenes_eGenes)
+
+
+all_egenes_biotype_summary_subset <- all_egenes_biotype_summary %>% 
+                                      rename(count_eGenes = count)  %>% 
+                                      mutate(dataset = sub("_.*", "", dataset)) %>%
+                                    dplyr::select(dataset, count_eGenes)
+
+all_biotype_summary_subset<- all_biotype_summary %>% 
+                              rename(count_background_exp_genes = count) %>%
+                              dplyr::select(dataset, count_background_exp_genes)
+
+all_adr_egenes_w_egenes <- full_join(all_adr_egenes_biotype_summary_subset, all_egenes_biotype_summary_subset, by = c("dataset"))
+
+all_adr_egenes_dual_egenes_nom_egenes <- full_join(all_adr_egenes_w_egenes, all_dual_adr_egenes_biotype_summary_subset, by = c("dataset"))
+
+all_egenes_adr_egenes_w_background <- full_join( all_adr_egenes_dual_egenes_nom_egenes,  all_biotype_summary_subset, by = c("dataset"))
+
+head(all_egenes_adr_egenes_w_background)
+```
+
+## Format files - Percent
+
+```{r}
+all_egenes_adr_egenes_w_background_percent <- all_egenes_adr_egenes_w_background %>%
+                                              mutate(percent_ADR_eGenes = round(100 * count_ADR_eGenes/count_background_exp_genes, 2), 
+                                              percent_eGenes = round(100 * count_eGenes/count_background_exp_genes, 2), 
+                                              percent_Dual_ADR_eGenes_eGenes = round(100 * count_Dual_ADR_eGenes_eGenes/count_background_exp_genes, 2)) %>% 
+                                              dplyr::select(dataset, 
+                                                            count_ADR_eGenes, 
+                                                            percent_ADR_eGenes, 
+                                                            count_eGenes, 
+                                                            percent_eGenes,
+                                                            count_Dual_ADR_eGenes_eGenes,
+                                                            percent_Dual_ADR_eGenes_eGenes,
+                                                            count_background_exp_genes)
+
+
+```
+
+```{r}
+all_egenes_adr_egenes_w_background_percent
+```
+
+
+
+### Format:  Table 1 A
+```{r}
+eGenes_ADR_eGenes_dual_Table <- all_egenes_adr_egenes_w_background_percent %>%
+  # rename dataset -> Population
+  rename(Population = dataset) %>%
+  arrange(Population) %>%
+  # format display columns
+  mutate(
+    Population    = paste0(Population, " (", count_background_exp_genes, ")"),
+    eGenes = paste0(count_eGenes, " (", percent_eGenes, "%)"),
+    ADR_eGenes     = paste0(count_ADR_eGenes, " (", percent_ADR_eGenes, "%)"),
+    Dual_eGenes_ADReGenes = paste0(count_Dual_ADR_eGenes_eGenes, " (", percent_Dual_ADR_eGenes_eGenes, "%)")
+  ) %>%
+  # select and reorder columns
+  dplyr::select(Population, eGenes, ADR_eGenes, Dual_eGenes_ADReGenes) 
+
+
+
+```
+
+
+```{r}
+eGenes_ADR_eGenes_dual_Table
+
+```
+
+### Write:  ADR/eGenes Table 1 A No Biotype
+
+```{r}
+write_tsv(eGenes_ADR_eGenes_dual_Table, "tables/TABLE_1_A_MAGENTA_eGenes_ADR_Dual_No_Biotype_v2.tsv")
+```
+
+### Read:  ADR/eGenes Table 1 A No Biotype
+
+```{r}
+eGenes_ADR_eGenes_dual_Table <- read_tsv( "tables/TABLE_1_A_MAGENTA_eGenes_ADR_Dual_No_Biotype_v2.tsv")
+```
+
+# Combo Population Gene summaries
+
+```{r}
+
+
+# Function to perform the customized join across multiple data frames
+join_dataframes_genes <- function(df_list) {
+  reduce(df_list, function(x, y) {
+    # Retain only distinct molecular_trait_id entries in both x and y
+    x_distinct <- x %>% dplyr::select("gene_id") %>% distinct(.)
+    y_distinct <- y %>% dplyr::select("gene_id") %>% distinct(.)
+    
+    # Perform the inner join on the distinct dataframes
+    inner_join(x_distinct, y_distinct, by = c("gene_id")) 
+  })
+}
+```
+
+# Analyze Shared Variants
+
+
+```{r}
+populations <- c("nhw", "ch", "aa", "per")
+
+file_types <- c("int_adr_eqtls", "no_int", "Dual_ADR-eGenes_eGenes_Correct")
+
+
+```
+
+
+### Function:  Summarize Counts & % Gene Level
+```{r}
+
+# Mapping of file_type codes to pretty labels
+file_type_labels <- c(
+  "int_adr_eqtls" = "ADR-eGenes",
+  "no_int" = "eGenes",
+  "Dual_ADR-eGenes_eGenes_Correct" = "Dual_eGenes_ADReGenes"
+)
+
+# Wrapper function to generate summaries across all combinations
+summarize_all_combos_adr_egenes_sharing <- function(populations, file_types) {
+  
+  result_list <- list()
+  
+  for (file_type in file_types) {
+    for (k in 2:length(populations)) {
+      combs <- combn(populations, k, simplify = FALSE)
+      for (pops in combs) {
+        
+        # Build the base data frames for this population combo
+        df_list <- lapply(pops, function(pop) {
+          get(paste0(pop, "_", file_type), envir = .GlobalEnv)
+        })
+        
+        # Join across the populations (intersection)
+        joined_df <- join_dataframes_genes(df_list)
+        
+        # Create dataset label: populations in UPPERCASE joined by "_"
+        pops_label <- paste(toupper(pops), collapse = "_")
+        
+        # Map file_type to friendly label
+        dataset_label <- paste0(pops_label, "_", file_type_labels[[file_type]])
+        
+        # Summarize
+        summary_df <- summarize_gene_level(joined_df, dataset_label)
+        
+        # Store in list
+        result_list[[dataset_label]] <- summary_df
+      }
+    }
+  }
+  
+  # Combine all results into one dataframe
+  final_df <- bind_rows(result_list)
+  
+  return(final_df)
+}
+
+
+```
+
+```{r}
+shared_genes_across_pops <- summarize_all_combos_adr_egenes_sharing(populations, file_types)
+```
+
+
+```{r}
+head(shared_genes_across_pops)
+```
+
+
+### Function Application:  ADR/eGenes across Populations
+
+```{r}
+shared_genes_across_pops_eGenes <- shared_genes_across_pops %>%
+                                   filter(str_ends(dataset, "_eGenes")) %>%
+                                   mutate(count_eGenes = count) %>%
+                                   mutate(dataset = str_remove(dataset, "_eGenes$")) %>%
+                                   dplyr::select(dataset, count_eGenes)
+
+shared_genes_across_pops_ADR_eGenes <- shared_genes_across_pops %>%
+                                   filter(str_ends(dataset, "_ADR-eGenes")) %>%
+                                   mutate(count_ADR_eGenes = count) %>%
+                                   mutate(dataset = str_remove(dataset, "_ADR-eGenes$")) %>%
+                                   dplyr::select(dataset, count_ADR_eGenes)
+
+shared_genes_across_pops_Dual_eGenes_ADReGenes <- shared_genes_across_pops %>%
+                                   filter(str_ends(dataset, "_Dual_eGenes_ADReGenes")) %>%
+                                   mutate(count_Dual_eGenes_ADReGenes = count) %>%
+                                   mutate(dataset = str_remove(dataset, "_Dual_eGenes_ADReGenes$")) %>%
+                                   dplyr::select(dataset, count_Dual_eGenes_ADReGenes)
+
+
+```
+
+
+## Combine shared ADR/eGenes across pops
+```{r}
+shared_genes_across_pops_eGenes_ADR_eGenes <- full_join(shared_genes_across_pops_eGenes, shared_genes_across_pops_ADR_eGenes, by = c("dataset"))
+
+shared_genes_across_pops_eGenes_ADR_eGenes_Dual <- full_join(shared_genes_across_pops_eGenes_ADR_eGenes, shared_genes_across_pops_Dual_eGenes_ADReGenes, by = c("dataset"))
+
+View(shared_genes_across_pops_eGenes_ADR_eGenes_Dual)
+```
+
+###  Write: Shared ADR/eGenes across Populations
+
+```{r}
+write_tsv(shared_genes_across_pops_eGenes_ADR_eGenes_Dual, "gene_level_sum/MAGENTA_ADR_eGenes_Dual_shared_across_populations_v2.tsv")
+```
+
+###  Read: Shared ADR/eGenes across Populations
+
+```{r}
+shared_genes_across_pops_eGenes_ADR_eGenes_Dual <- read_tsv('gene_level_sum/MAGENTA_ADR_eGenes_Dual_shared_across_populations_v2.tsv')
+```
+
+```{r}
+shared_genes_across_pops_eGenes_ADR_eGenes_Dual
+```
+
+### Extract necessary background comparisions 
+
+```{r}
+back_comp_combos <- tolower(unique(shared_genes_across_pops_eGenes_ADR_eGenes_Dual$dataset))
+```
+
+
+
+## Create Shared Genes 
+```{r}
+
+# Function to join multiple datasets based on gene_id and gene_biotype
+join_populations <- function(populations) {
+  # Build a list of dataframes based on population names
+  df_list <- lapply(populations, function(pop) {
+    get(paste0(tolower(pop), "_exp_ensg"), envir = .GlobalEnv)
+  })
+  
+  # Successive inner joins
+  reduce(df_list, function(x, y) {
+    inner_join(x, y, by = c("gene_id"))
+  })
+}
+
+# Main function to summarize across all combinations
+summarize_back_combos <- function(back_comp_combos) {
+  
+  result_list <- list()
+  
+  for (combo in back_comp_combos) {
+    # Split combo by "_" and uppercase
+    pops <- strsplit(combo, "_")[[1]]
+    pops_label <- toupper(paste(pops, collapse = "_"))
+    
+    # Join all relevant population datasets
+    joined_df <- join_populations(pops)
+    
+    # Summarize by gene_biotype
+    summary_df <- joined_df %>%
+      summarise(count_shared_exp_genes = n(), .groups = "drop") %>%
+      mutate(dataset = pops_label) %>%
+      dplyr::select(dataset, count_shared_exp_genes)
+    
+    result_list[[pops_label]] <- summary_df
+  }
+  
+  # Combine all summaries into one dataframe
+  final_df <- bind_rows(result_list)
+  
+  return(final_df)
+}
+
+
+shared_genes_summary <- summarize_back_combos(back_comp_combos)
+shared_genes_summary
+
+```
+
+# Write out Combo Shared Background Exp Genes
+
+```{r}
+write_tsv(shared_genes_summary,'gene_level_sum/MAGENTA_ALL_EXP_Genes_Combos.tsv')
+```
+
+# Read:  Combo Shared Background Exp Genes
+
+```{r}
+shared_genes_summary <- read_tsv('gene_level_sum/MAGENTA_ALL_EXP_Genes_Combos.tsv')
+```
+
+
+```{r}
+shared_genes_across_pops_eGenes_ADR_eGenes_Dual_w_background <- left_join( shared_genes_across_pops_eGenes_ADR_eGenes_Dual,  shared_genes_summary, by = c("dataset"))
+
+head(shared_genes_across_pops_eGenes_ADR_eGenes_Dual_w_background)
+```
+
+### Format files
+
+```{r}
+shared_genes_across_pops_eGenes_ADR_eGenes_Dual_w_background_percent <- shared_genes_across_pops_eGenes_ADR_eGenes_Dual_w_background %>%
+                                              mutate(percent_ADR_eGenes = round(100 * count_ADR_eGenes/count_shared_exp_genes, 2), 
+                                              percent_eGenes = round(100 * count_eGenes/count_shared_exp_genes, 2), 
+                                              percent_Dual_eGenes_ADReGenes = round(100 * count_Dual_eGenes_ADReGenes/count_shared_exp_genes, 2)) %>% 
+                                              dplyr::select(dataset, 
+                                                            count_ADR_eGenes, 
+                                                            percent_ADR_eGenes, 
+                                                            count_eGenes, 
+                                                            percent_eGenes,
+                                                            count_Dual_eGenes_ADReGenes,
+                                                            percent_Dual_eGenes_ADReGenes,
+                                                            count_shared_exp_genes)
+
+head(shared_genes_across_pops_eGenes_ADR_eGenes_Dual_w_background_percent)
+
+```
+
+### Table 1 Format No Biotype
+
+
+```{r}
+eGenes_ADR_eGenes_dual_Table_by_gene_shared_across_pops <- shared_genes_across_pops_eGenes_ADR_eGenes_Dual_w_background_percent %>%
+  # rename dataset -> Population
+  rename(Population = dataset) %>%
+  arrange(Population) %>%
+  # format display columns
+  mutate(
+    Population    = paste0(Population, " (", count_shared_exp_genes, ")"),
+    eGenes = paste0(count_eGenes, " (", percent_eGenes, "%)"),
+    ADR_eGenes     = paste0(count_ADR_eGenes, " (", percent_ADR_eGenes, "%)"),
+    Dual_eGenes_ADReGenes = paste0(count_Dual_eGenes_ADReGenes, " (", percent_Dual_eGenes_ADReGenes, "%)")
+  ) %>%
+  # select and reorder columns
+  dplyr::select(Population, eGenes, ADR_eGenes, Dual_eGenes_ADReGenes) 
+
+
+
+```
+
+```{r}
+eGenes_ADR_eGenes_dual_Table_by_gene_shared_across_pops
+```
+
+
+### Write: Shared ADR/eGenes Table 1 B 
+
+```{r}
+write_tsv(eGenes_ADR_eGenes_dual_Table_by_gene_shared_across_pops, "tables/TABLE_1_B_MAGENTA_Shared_eGenes_ADR_Dual_No_Biotype_v2.tsv")
+```
+
+### Read: Shared ADR/eGenes Table 1 B 
+
+```{r}
+eGenes_ADR_eGenes_dual_Table_by_gene_shared_across_pops <- read_tsv( "tables/TABLE_1_B_MAGENTA_Shared_eGenes_ADR_Dual_No_Biotype_v2.tsv")
+```
+
+# FINAL: Table 1 
+
+```{r}
+
+table_1_no_biotype <- rbind(eGenes_ADR_eGenes_dual_Table, eGenes_ADR_eGenes_dual_Table_by_gene_shared_across_pops)
+
+table_1_no_biotype
+
+```
+
+
+## Write:  Table 1 No Biotype
+
+```{r}
+write_tsv(table_1_no_biotype, "tables/TABLE_1_FINAL_MAGENTA_eGenes_ADR_Dual_no_biotypes_v2.tsv")
+```
+
+## Read:  Table 1 No Biotype
+
+```{r}
+table_1_no_biotype <- read_tsv("tables/TABLE_1_FINAL_MAGENTA_eGenes_ADR_Dual_no_biotypes_v2.tsv")
+```
+
+```{r}
+table_1_no_biotype
+```
+
+
