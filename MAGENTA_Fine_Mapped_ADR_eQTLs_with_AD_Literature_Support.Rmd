@@ -1,0 +1,170 @@
+---
+title: "MAGENTA: Likely Causal ADR-eQTLs with AD-Literature Support"
+author: "Makaela Mews"
+date: "`r Sys.Date()`"
+linkcolor: blue
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    number_sections: true
+    code_folding: show
+    df_print: paged
+    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Load Packages
+
+```{r}
+library(tidyverse)
+```
+## Load Literature-supported ADR-eGenes
+
+```{r}
+lit_sup_adr_egenes <- read_tsv('susie/MAGENTA_SUSIE_ADR_eGenes_look_up.txt', col_names = c("population", "hgnc_symbol", "pmids"), skip = 1 ) %>%
+           filter(!is.na(pmids))
+
+
+```
+
+## Load Data
+
+```{r}
+aa_susie <- read_tsv('susie/MAGENTA_ADR_eQTLs_susie_pip_w_cs_AA_est_resid_var.txt') %>%
+            mutate(population = "AA")
+ch_susie <- read_tsv('susie/MAGENTA_ADR_eQTLs_susie_pip_w_cs_CH_AD_est_resid_var.txt') %>% 
+            mutate(population = "CH")
+nhw_susie <- read_tsv('susie/MAGENTA_ADR_eQTLs_susie_pip_w_cs_NHW_est_resid_var.txt') %>%
+             mutate(population = "NHW")
+per_susie <- read_tsv('susie/MAGENTA_ADR_eQTLs_susie_pip_w_cs_PER_est_resid_var.txt') %>%
+             mutate(population = "PER")
+
+susie <- rbind(aa_susie, ch_susie, nhw_susie, per_susie)
+```
+## Load Data
+
+```{r}
+aa_susie_dual <- read_tsv('susie/MAGENTA_dual_eQTLs_susie_pip_w_cs_AA_est_resid_var.txt') %>%
+            mutate(population = "AA")
+ch_susie_dual <- read_tsv('susie/MAGENTA_dual_eQTLs_susie_pip_w_cs_CH_AD_est_resid_var.txt') %>% 
+            mutate(population = "CH")
+nhw_susie_dual <- read_tsv('susie/MAGENTA_dual_eQTLs_susie_pip_w_cs_NHW_est_resid_var.txt') %>%
+             mutate(population = "NHW")
+per_susie_dual <- read_tsv('susie/MAGENTA_dual_eQTLs_susie_pip_w_cs_PER_est_resid_var.txt') %>%
+             mutate(population = "PER")
+
+susie_dual <- rbind(aa_susie_dual, ch_susie_dual, nhw_susie_dual, per_susie_dual)
+```
+## Read HGNC Key
+
+```{r}
+ensg_hgnc_key <- read_tsv('key_files/MAGENTA_ALL_EXP_Genes_ENSG_HGNC_Gene_Biotype.tsv')
+```
+
+## Join with HGNC Key
+
+```{r}
+susie_hgnc <- left_join(susie, ensg_hgnc_key, by = c("molecular_trait_id" = "ensembl_gene_id"))
+```
+
+```{r}
+susie_dual_hgnc <- left_join(susie_dual, ensg_hgnc_key, by = c("molecular_trait_id" = "ensembl_gene_id"))
+```
+
+
+## Function:  Extract High Confidence Sparse ADR-eQTLs
+
+```{r}
+summarize_by_population <- function(dat, pip_cutoff = 0.7) {
+  dat %>%
+    filter(!is.na(pip), pip > pip_cutoff) %>%
+    filter(gene_biotype == "protein_coding") %>%
+    distinct() %>%
+    group_by(population) %>%
+    summarise(
+      n_rows = n(),
+      n_distinct_rows = n_distinct(
+        interaction(molecular_trait_id, hgnc_symbol, drop = TRUE)
+      ),
+      hgnc_symbols = paste(
+        sort(unique(hgnc_symbol[!is.na(hgnc_symbol)])),
+        collapse = ", "
+      ),
+      gene_ids = paste(
+        sort(unique(molecular_trait_id[!is.na(molecular_trait_id)])),
+        collapse = ", "
+      ),
+      .groups = "drop"
+    )
+}
+
+```
+
+## Application: Save Table
+
+### ADR-eQTLs
+
+```{r}
+susie_7_protein_by_pop <- summarize_by_population(susie_hgnc, pip_cutoff = 0.7)
+susie_7_protein_by_pop
+write_tsv(susie_7_protein_by_pop, file = "susie/MAGENTA_SUSIE_Protein_Coding_PIP_7_ADR_eGenes_Table_by_Population.tsv")
+```
+
+
+### Dual ADR/eQTLs
+
+```{r}
+susie_dual_7_protein_by_pop <- summarize_by_population(susie_dual_hgnc, pip_cutoff = 0.7)
+susie_dual_7_protein_by_pop
+write_tsv(susie_dual_7_protein_by_pop, file = "susie/MAGENTA_SUSIE_Protein_Coding_DUAL_ADR_eGens_PIP_7_Table_by_Population.tsv")
+```
+
+
+## Compare Results: ADR-eQTLs vs. eQTLs for Genes with Dual Associations
+
+-- X: ADR-eQTLs, Y: Dual eQTLs/ADR-eQTLs
+```{r}
+susie_adr_dual_join <- inner_join(susie_hgnc, susie_dual_hgnc, by = c("molecular_trait_id", "population"))
+```
+## Dual eQTLs vs. ADR-eGenes
+```{r}
+susie_adr_dual_join_shared_sig_gene_signals <- susie_adr_dual_join %>% filter(pip.x > 0.7 & pip.y > 0.7 & gene_biotype.x == "protein_coding") 
+susie_adr_dual_join_shared_sig_gene_signals %>% nrow()
+susie_adr_dual_join_shared_sig_gene_signals_variants <- susie_adr_dual_join_shared_sig_gene_signals %>% filter(variant_id.x == variant_id.y)
+susie_adr_dual_join_shared_sig_gene_signals_variants %>% nrow()
+```
+
+## Connect with Literature Supported AD-related Genes
+
+-- Literature Review: NCBI Gene Search, add "AND Alzheimer's" to query and extract PMIDs
+
+```{r}
+susie_hgnc_lit_sup <- left_join(susie_hgnc, lit_sup_adr_egenes, by = c("population", "hgnc_symbol"))
+```
+
+## Filter: AD Literature Supported & High PIP > 0.7
+
+-- Likely causal ADR-eQTL
+
+```{r}
+susie_hgnc_lit_sup_high_confi <- susie_hgnc_lit_sup %>% filter(!is.na(pmids) & pip > 0.7)
+susie_hgnc_lit_sup_high_confi
+``` 
+
+### Write: ADR-eQTLs Supported by AD Research
+
+```{r}
+write_tsv(susie_hgnc_lit_sup_high_confi, "susie/MAGENTA_SUSIE_Causal_SNPs_PIP_7_Protein_Coding_Lit_Sup.tsv")
+```
+
+
+# Session: 
+
+```{r}
+sessionInfo()
+```
+
